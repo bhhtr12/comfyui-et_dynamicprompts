@@ -1,5 +1,6 @@
 import random
 from dynamicprompts.generators import RandomPromptGenerator, CombinatorialPromptGenerator
+from dynamicprompts.wildcards.wildcard_manager import WildcardManager
 
 
 class ETDynamicPrompt:
@@ -15,6 +16,7 @@ class ETDynamicPrompt:
                 "gen_type": (["random", "combinatorial"], {"default": "random", "tooltip": "Determines the type of prompt generation to use. Combinatorial returns all possible combinations, while random returns random combinations."}),
                 "seed_type": (["fixed", "sequential", "random"], {"default": "random", "tooltip": "Determines how returned seeds are generated. Fixed uses the set seed for all generations, sequential seeds start at the set seed, and random seeds are random for each prompt, seeded by the set seed."}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2000000000, "tooltip": "The seed to use for generating images. Plug returned seed(s) into sampler."}),
+                "wildcard_dir": ("STRING", {"default": "", "multiline": False, "tooltip": "Path to the directory containing wildcard .txt files (e.g. /path/to/wildcards). Wildcards in the prompt (like {color} or {__color__}) will be resolved using files from this folder. Leave empty to disable wildcard support."}),
             },
         }
 
@@ -25,7 +27,7 @@ class ETDynamicPrompt:
     CATEGORY = "exectails/Dynamic"
     FUNCTION = "process"
 
-    def process(self, text: str, count: int, gen_type: str, seed_type: str, seed: int) -> tuple:
+    def process(self, text: str, count: int, gen_type: str, seed_type: str, seed: int, wildcard_dir: str) -> tuple:
         generator = None
 
         prompts = []
@@ -34,28 +36,31 @@ class ETDynamicPrompt:
         if count < 1:
             count = 1
 
+        # create WildcardManager if valid directory is provided
+        wildcard_manager = None
+        if wildcard_dir and isinstance(wildcard_dir, str) and wildcard_dir.strip():
+            wildcard_manager = WildcardManager(wildcard_dir.strip())
+
         if gen_type == "combinatorial":
-            generator = CombinatorialPromptGenerator()
+            generator = CombinatorialPromptGenerator(wildcard_manager=wildcard_manager)
 
             combination_count = None
 
             for i in range(count):
                 prompts += generator.generate(text)
 
-                if combination_count == None:
+                if combination_count is None:
                     combination_count = len(prompts)
 
                 random.seed(seed)
                 seeds += self.get_seeds(seed_type, seed, combination_count)
 
-                # Increase seeds for subsequent prompt collections,
-                # so each "batch" gets its own seed and differs from
-                # the previous ones. Otherwise, we'd just get the same
-                # set over and over.
-                if seed_type == "sequential": seed += combination_count
-                else: seed += 1
+                if seed_type == "sequential":
+                    seed += combination_count
+                else:
+                    seed += 1
         else:
-            generator = RandomPromptGenerator()
+            generator = RandomPromptGenerator(wildcard_manager=wildcard_manager)
 
             prompts = generator.generate(text, num_images=count)
             seeds = self.get_seeds(seed_type, seed, count)
